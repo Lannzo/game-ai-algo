@@ -8,7 +8,6 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { ExtrudeGeometry } from "three"; // Needed for Hearts
 import { TextureLoader, EquirectangularReflectionMapping } from 'three';
 
-
 // --- DOM Elements ---
 const canvasContainer = document.getElementById("gameCanvasContainer");
 const canvas = document.getElementById("threeCanvas");
@@ -29,11 +28,11 @@ const CELL_3D_SIZE = 2;
 const WALL_HEIGHT = CELL_3D_SIZE * 2.5;
 const WALL_DENSITY = 0.28;
 const DAMPENER_DENSITY = 0.15; // % of floor cells that become dampeners
-const INITIAL_FUEL = 10;
-const FUEL_PER_UPGRADE = 5;
+const INITIAL_FUEL = 8;
+const FUEL_PER_UPGRADE = 3;
 const INITIAL_POWERUP_COUNT = 8;
 const BASE_MOVE_COST = 1; // Cost for normal floor
-const DAMPENER_MOVE_COST = 2; // Cost for dampener floor
+const DAMPENER_MOVE_COST = 3; // Cost for dampener floor
 const INITIAL_HEALTH = 3;
 const MAX_POWERUPS = Math.floor(GRID_SIZE * GRID_SIZE * 0.02);
 
@@ -115,6 +114,39 @@ let plannedShootCost = 0;
 let currentHoverPos = null;
 let gameOverState = null;
 let isResolving = false;
+
+const SPAWN_POINTS = [
+  { x: 0, y: 0 },
+  { x: GRID_SIZE - 1, y: 0 },
+  { x: 0, y: GRID_SIZE - 1 },
+  { x: GRID_SIZE - 1, y: GRID_SIZE - 1 },
+  { x: Math.floor(GRID_SIZE/2), y: 0 },
+  { x: Math.floor(GRID_SIZE/2), y: GRID_SIZE - 1 },
+  { x: 0, y: Math.floor(GRID_SIZE/2) },
+  { x: GRID_SIZE - 1, y: Math.floor(GRID_SIZE/2) },
+];
+
+function getRandomSpawn(shooterPos, shooterFuel) {
+  const candidates = [];
+  for (let y = 0; y < GRID_SIZE; y++) {
+    for (let x = 0; x < GRID_SIZE; x++) {
+      if (
+        (grid[y][x] === 'floor' || grid[y][x] === 'dampener') &&
+        !(x === shooterPos.x && y === shooterPos.y) &&
+        !isWall(x,y)
+      ) {
+        // check shot-path cost to shooterPos:
+        const path = findShortestMissilePath({ x, y }, shooterPos, []);
+        const cost = path ? path.cost : Infinity;
+        if (cost > shooterFuel) {
+          candidates.push({ x, y });
+        }
+      }
+    }
+  }
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
 
 // --- Initialization ---
 function init() {
@@ -1037,53 +1069,62 @@ function findShortestMissilePath(startPos, targetPos, opponentBlockers = []) {
 
 
 
-function findBestActionUCSBased() { //simple thinking AI that uses UCS to decide actions
+function findBestActionUCSBased() {
   const startTime = performance.now();
 
-  // 1) Attempt a UCS‐based shot if AI has enough fuel
-  const shootResult = findShortestMissilePath(aiPos, playerPos, []);
-  if (shootResult && shootResult.cost <= aiFuel) {
-    console.log(
-      `AI Decision: Shooting player. Path cost ${shootResult.cost}, remaining fuel ${aiFuel}.`
-    );
-    const action = {
-      type: "shoot",
-      target: { ...playerPos },
-      _path: shootResult.path,
-      _cost: shootResult.cost
-    };
-    console.log(`AI decision took ${(performance.now() - startTime).toFixed(2)} ms.`);
-    return action;
-  }
+  // Precompute distances to every power-up
+  const dAi = powerUpPositions.map(p => ({
+    pos: p,
+    distAi: distance(aiPos, p),
+    distPl: distance(playerPos, p)
+  }));
 
-  // 2) No shot possible—find the nearest fuel cell via BFS
-  let bestFuelPath = null;
-  let bestFuelTarget = null;
-  for (const upgradePos of powerUpPositions) {
-    const path = findShortestPath_SimpleBFS(aiPos, upgradePos, [playerPos]);
-    if (path && path.length > 1) {
-      if (!bestFuelPath || path.length < bestFuelPath.length) {
-        bestFuelPath = path;
-        bestFuelTarget = upgradePos;
+  // 0) Fuel-denial shot:
+  // If there's any cell where player is strictly closer than AI, try to shoot the player
+  // (to respawn them far from that fuel).
+  for (const { pos, distAi, distPl } of dAi) {
+    if (distPl < distAi) {
+      const shootRes = findShortestMissilePath(aiPos, playerPos, []);
+      if (shootRes && shootRes.cost <= aiFuel) {
+        console.log(`AI Decision: Deny fuel—shooting player near (${pos.x},${pos.y}).`);
+        console.log(`AI decision took ${(performance.now() - startTime).toFixed(2)} ms.`);
+        return { type: "shoot", target: { ...playerPos }, _path: shootRes.path, _cost: shootRes.cost };
       }
     }
   }
 
-  if (bestFuelPath) {
-    const nextStep = bestFuelPath[1];
-    console.log(
-      `AI Decision: No shot—moving toward fuel at ${bestFuelTarget.x},${bestFuelTarget.y}. Next step ${nextStep.x},${nextStep.y}.`
-    );
-    const action = { type: "move", target: nextStep };
+  // 1) Kill shot if possible
+  const shootPlayer = findShortestMissilePath(aiPos, playerPos, []);
+  if (shootPlayer && shootPlayer.cost <= aiFuel) {
+    console.log(`AI Decision: Shooting player directly. Cost ${shootPlayer.cost}.`);
     console.log(`AI decision took ${(performance.now() - startTime).toFixed(2)} ms.`);
-    return action;
+    return { type: "shoot", target: { ...playerPos }, _path: shootPlayer.path, _cost: shootPlayer.cost };
   }
 
-  // 3) Fallback: nowhere to shoot or refuel
-  console.log("AI Decision: No viable shot or fuel path—staying put.");
+  // 2) Refuel: move toward the nearest power-up *to the AI*
+  let bestFuel = null;
+  dAi.forEach(({ pos, distAi }) => {
+    if (!bestFuel || distAi < bestFuel.distAi) bestFuel = { pos, distAi };
+  });
+
+  if (bestFuel) {
+    const path = findShortestPath_SimpleBFS(aiPos, bestFuel.pos, [playerPos]);
+    if (path && path.length > 1) {
+      const next = path[1];
+      console.log(
+        `AI Decision: No shot—moving to nearest fuel at ${bestFuel.pos.x},${bestFuel.pos.y}.`
+      );
+      console.log(`AI decision took ${(performance.now() - startTime).toFixed(2)} ms.`);
+      return { type: "move", target: next };
+    }
+  }
+
+  // 3) Fallback
+  console.log("AI Decision: No action possible—staying put.");
   console.log(`AI decision took ${(performance.now() - startTime).toFixed(2)} ms.`);
   return { type: "stay" };
 }
+
 
 
 // --- Simple BFS for basic reachability  ---
@@ -1175,6 +1216,26 @@ async function executeAction(action) {
         if (hitPlayer === 'player') playerHealth--; else aiHealth--;
         actionMessageLog.push(`${hitPlayer.toUpperCase()} health reduced to ${hitPlayer === 'player' ? playerHealth : aiHealth}.`);
         updateHealthInfo();
+        if (hitPlayer === 'player') {
+            // respawn player out of AI’s shot-range
+            const spawn = getRandomSpawn(aiPos, aiFuel);
+            if (spawn) {
+                playerPos = { ...spawn };
+                playerMesh.position.copy(get3DPosition(spawn.x, spawn.y, CELL_3D_SIZE * 0.5));
+                actionMessageLog.push(`You were hit! Respawning at (${spawn.x},${spawn.y}).`);
+            }
+        } else {
+            // respawn AI out of player’s shot-range
+            const spawn = getRandomSpawn(playerPos, playerFuel);
+            if (spawn) {
+                aiPos = { ...spawn };
+                aiMesh.position.copy(get3DPosition(spawn.x, spawn.y, CELL_3D_SIZE * 0.5));
+                actionMessageLog.push(`AI was hit! Respawning at (${spawn.x},${spawn.y}).`);
+            }
+        }
+        clearHighlights(); // Clear highlights after action
+        renderHighlights(); // Re-render highlights after action
+
         if (playerHealth <= 0) { setMessage(actionMessageLog.join(" ")); endGame("AI Wins! Player eliminated.", "ai"); return; }
         else if (aiHealth <= 0) { setMessage(actionMessageLog.join(" ")); endGame("Player Wins! AI eliminated.", "player"); return; }
     }
@@ -1198,6 +1259,8 @@ async function executeAction(action) {
         else { setMessage("Your Turn: Plan your action. Check nuke indicators!"); updatePhaseIndicator(); enablePlanningControls(); setPlanningMode("move"); }
     } else { isResolving = false; }
 }
+
+
 
 // --- Fuel Cell Explosion Logic 
 async function triggerFuelChainExplosion(startX, startY) {

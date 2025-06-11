@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grid Missile Duel</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap");
+    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    #landing-container {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      background: #000814;
+      color: #66ffcc;
+      font-family: 'Orbitron', sans-serif;
+    }
+    #landing-container h1 {
+      font-size: 4rem;
+      margin-bottom: 1rem;
+    }
+    #btn-start, #btn-hard, #btn-play-music {
+      padding: 1rem 2rem;
+      font-size: 1.25rem;
+      background: #004466;
+      border: 2px solid #66ffcc;
+      border-radius: 6px;
+      color: #66ffcc;
+      cursor: pointer;
+      transition: background 0.2s ease;
+      max-width: 300px;
+      margin : 0 auto;
+    }
+    #btn-start:hover {
+      background: #006688;
+    }
+
+     #btn-instructions {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 0.4rem 0.8rem;
+      font-size: 0.9rem;
+      background: #004466;
+      border: 2px solid #66ffcc;
+      border-radius: 4px;
+      color: #66ffcc;
+      cursor: pointer;
+      z-index: 1000;
+      font-family: 'Orbitron', sans-serif;
+      /* ensure it only wraps its text */
+      width: auto;
+    }
+    #btn-instructions:hover { background: #006688; }
+  </style>
+</head>
+<body>
+    <button id="btn-instructions">Instructions</button>
+    
+
+  <div id="landing-container">
+    <h1>Grid Missile Duel</h1>
+    <button id="btn-start">Start Game</button><br>
+    <button id="btn-hard">Hard Mode</button><br>
+    <button id="btn-play-music">Play Music</button>
+  </div>
+
+<audio id="landingBgm" src="media/bgm.mp3" loop preload="auto"></audio>
+
+<script>
+// grab the button and audio element
+const playBtn = document.getElementById('btn-play-music');
+const bgm     = document.getElementById('landingBgm');
+
+// set initial volume
+bgm.volume = 0.25;
+
+// when clicked, play
+playBtn.addEventListener('click', () => {
+  bgm.play().catch(console.error);
+});
+
+//when clicked, stop
+playBtn.addEventListener('dblclick', () => {
+  bgm.pause();
+  bgm.currentTime = 0;
+});
+
+  document.getElementById('btn-start').addEventListener('click', () => {
+    window.location.href = 'index.html';
+  });
+
+  document.getElementById('btn-hard').addEventListener('click', () => {
+    window.location.href = 'hard.html';
+  });
+</script>
+<script>
+  document.getElementById('btn-instructions').addEventListener('click', () => {
+    alert("Welcome to Grid Missile Duel!\n\n" +
+          "In this game, you control a missile launcher on a grid. Your goal is to outmaneuver and outsmart your opponent by planning your moves and attacks strategically.\n\n" +
+          "1. **Planning Phase**: Choose whether to move or shoot missiles.\n" +
+          "2. **Execution Phase**: Watch as your plans unfold in real-time.\n" +
+          "3. **Victory Conditions**: Deplete your opponent's health to win the game.\n\n" +
+          "Good luck!");
+  });
+</script>
+
+</body>
+</html>
